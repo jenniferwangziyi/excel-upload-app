@@ -6,7 +6,7 @@
 > 1. **唯一檔名**：上傳的檔案以 `原始檔名__上傳者__時間戳記.副檔名` 存檔，多次上傳同一份檔案不會覆蓋。
 > 2. **自動觸發匯入**：上傳成功後，App 會自動以 `run_now` 觸發匯入 Job，並將唯一檔名帶入 Job 的 `file_name` 參數。
 > 3. **動態欄位解析 + 正規化長表**：Notebook 以正則動態解析 Excel 欄位名稱（如 `Q1 2026`、`Q2 2026 預估`、`FY 2027 預估`），自動萃取 `period_type`（Q/FY）、`year`、`quarter`、`is_estimate`，並 unpivot 為固定 schema 的長表。未來 Excel 新增季度無需改 code。
-> 4. **Append 模式 + 版本欄位**：以 `append` 寫入 `bloomberg_consensus_model`，並附加 `source_file`、`upload_user`、`upload_datetime` 以區分不同版本。
+> 4. **批次去重 + 版本欄位**：以 `batch_key`（= Sheet 名稱）判斷是否重複匯入——同批次先刪除舊資料再寫入，新批次直接 `append`；並附加 `data_version`、`source_file`、`upload_user`、`upload_datetime` 以區分不同版本。
 
 ---
 
@@ -110,12 +110,14 @@ COMMENT '記錄每次 Excel 上傳的歷史';
 > | `year` | INT | 年度 |
 > | `quarter` | INT | 季度（1-4），FY 時為 null |
 > | `is_estimate` | BOOLEAN | 是否為預估值 |
-> | `value` | DOUBLE | 數值 |
+> | `value` | DECIMAL(38,7) | 數值（單位：新台幣元；Excel 原始單位為百萬，Notebook 已 ×1,000,000） |
 > | `source_file` | STRING | 來源檔名 |
 > | `upload_user` | STRING | 上傳者 |
 > | `upload_datetime` | TIMESTAMP | 上傳時間 |
+> | `data_version` | STRING | 資料版本鍵（`V_Q{最早預估季度}_{年度}_ESTIMATE`） |
+> | `batch_key` | STRING | 批次鍵（= Sheet 名稱，如 `BLB_260723`） |
 >
-> **寫入模式**：Notebook 以 `append` 寫入目標表（schema 固定，不需 `mergeSchema`）。每次上傳都是一筆新版本，不會覆蓋既有資料。`upload_user` / `upload_datetime` 由 Notebook 依 `file_name` 從 `upload_history` 查得（手動執行且查無紀錄時為 NULL）。
+> **寫入模式**：Notebook 以 `batch_key`（= Sheet 名稱）判斷是否重複匯入：表不存在時自動建表；同 `batch_key` 不存在時直接 `append`；同 `batch_key` 已存在時先 `DELETE` 舊資料再寫入（schema 固定，不需 `mergeSchema`）。若以 `setup.sql` 預先建表，欄位與型別需與上表一致。`upload_user` / `upload_datetime` 由 Notebook 依 `file_name` 從 `upload_history` 查得（手動執行且查無紀錄時為 NULL）。
 
 #### `static/index.html`
 
@@ -163,7 +165,7 @@ COMMENT '記錄每次 Excel 上傳的歷史';
 1. 開啟 App 網址，透過拖放或選取上傳 Excel 檔案（.xlsx / .xls）
 2. 上傳成功後，檔案會以唯一檔名（`原始檔名__上傳者__時間戳記`）落地在 Unity Catalog Volume 中，不會覆蓋既有檔案
 3. App 自動以該唯一檔名觸發「Read Bloomberg Excel to Delta Table」Job
-4. Job 動態解析 Excel 欄位名稱，萃取 `period_type` / `year` / `quarter` / `is_estimate`，unpivot 為正規化長表後以 `append` 模式寫入 `bloomberg_consensus_model`
+4. Job 動態解析 Excel 欄位名稱，萃取 `period_type` / `year` / `quarter` / `is_estimate`，unpivot 為正規化長表後寫入 `bloomberg_consensus_model`（同 `batch_key` 會取代舊資料）
 5. 匯入完成後即可在 SQL Editor 或 Dashboard 中查詢資料，並依版本欄位區分不同上傳
 
 ---
@@ -197,7 +199,7 @@ A：不需要。Notebook 以正則動態解析欄位名稱，只要格式符合 
 
 - Notebook 預設以 Excel 第 4 列作為表頭（`header=3`），前 3 列視為 metadata，讀取 B～L 欄（`usecols="B:L"`），請確認您的 Excel 格式一致
 - Excel 欄位名稱必須符合格式：`Q{1-4} {年份}`、`Q{1-4} {年份} 預估`、`FY {年份}`、`FY {年份} 預估`，以及一欄包含「單位」的指標名稱欄
-- 每次執行 Job 會以 `append` 模式將 unpivot 後的正規化資料寫入 Delta Table（schema 固定，不需 `mergeSchema`）。如需只保留最新版本，可在查詢時依 `upload_datetime` 取最新
+- 每次執行 Job 會將 unpivot 後的正規化資料寫入 Delta Table（schema 固定，不需 `mergeSchema`）。同一 Sheet 名稱（`batch_key`）重複上傳會取代該批次舊資料；不同批次會並存，如需只保留最新版本，可在查詢時依 `batch_key` 或 `upload_datetime` 取最新
 - 因為採唯一檔名，Volume 中的檔案會隨上傳次數累積；如需節省儲存空間，可定期清理舊檔（不影響已匯入的表資料）
 - 建議部署完成後先用測試檔案驗證整個流程
 
@@ -234,7 +236,7 @@ A：不需要。Notebook 以正則動態解析欄位名稱，只要格式符合 
    - volume_path 改為: /Volumes/<CATALOG>/<SCHEMA>/<VOLUME>/
    - history_table 改為: <CATALOG>.<SCHEMA>.upload_history
    - table_name 改為: <CATALOG>.<SCHEMA>.<你想要的 TABLE 名稱>
-   - 確認寫入模式為 append（schema 固定為正規化長表，不需 mergeSchema）
+   - 確認寫入邏輯維持以 batch_key 去重（同批次先刪除再寫入，新批次 append；schema 固定為正規化長表，不需 mergeSchema）
 
 5. 修改 static/index.html 顯示文字中的 Volume 路徑，改為我的 Volume 路徑
 

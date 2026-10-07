@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.upload_history (
 COMMENT '記錄每次 Excel 上傳的歷史';
 
 -- 5. 匯入目標表 bloomberg_consensus_model（正規化長表）
---    read_bloomberg Notebook 會動態解析 Excel 欄位並 unpivot 後以 append 寫入。
+--    read_bloomberg Notebook 會動態解析 Excel 欄位並 unpivot 後寫入；
+--    以 batch_key（= Sheet 名稱）去重：同批次先刪除再寫入，新批次 append。
+--    欄位與型別須與 Notebook 輸出一致（含 data_version、batch_key，value 為 DECIMAL(38,7)）。
 --    Schema 固定，未來新增季度不需調整。
 --    可預先建立，或由 Notebook 首次執行時自動建立。
 CREATE TABLE IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.bloomberg_consensus_model (
@@ -38,10 +40,12 @@ CREATE TABLE IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.bloomberg_consensus_
   year             INT       COMMENT '年度',
   quarter          INT       COMMENT '季度 (1-4)，FY 時為 null',
   is_estimate      BOOLEAN   COMMENT '是否為預估值',
-  value            DOUBLE    COMMENT '數值（單位：新台幣百萬）',
+  value            DECIMAL(38,7) COMMENT '數值（單位：新台幣元 NTD；Excel 原始單位為百萬，Notebook 已 ×1,000,000）',
   source_file      STRING    COMMENT '來源檔名',
   upload_user      STRING    COMMENT '上傳者',
-  upload_datetime  TIMESTAMP COMMENT '上傳時間'
+  upload_datetime  TIMESTAMP COMMENT '上傳時間',
+  data_version     STRING    COMMENT '資料版本鍵(格式: V_Q{quarter}_{year}_ESTIMATE)',
+  batch_key        STRING    COMMENT '批次鍵 (Sheet 名稱，如 BLB_260723)'
 )
 COMMENT 'Bloomberg consensus model - 正規化長表（動態解析 Excel 欄位後 unpivot）';
 
