@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Excel Upload</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f7fa;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .container {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 2.5rem;
+      max-width: 800px;
+      width: 100%;
+    }
+    h1 { font-size: 1.5rem; color: #1b3a4b; margin-bottom: 0.5rem; }
+    .subtitle { color: #6b7280; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    .drop-zone {
+      border: 2px dashed #cbd5e1;
+      border-radius: 8px;
+      padding: 1.5rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 1rem;
+    }
+    .drop-zone.dragover { border-color: #3b82f6; background: #eff6ff; }
+    .drop-zone.has-file { border-color: #10b981; background: #ecfdf5; }
+    .drop-zone p { color: #64748b; font-size: 0.95rem; }
+    .drop-zone .icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .file-name { color: #1e40af; font-weight: 600; margin-top: 0.5rem; }
+    .btn {
+      width: 100%; padding: 0.85rem; font-size: 1rem; font-weight: 600;
+      border: none; border-radius: 8px; cursor: pointer; transition: background 0.2s;
+    }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+    .status-box {
+      margin-top: 1.5rem; padding: 1rem; border-radius: 8px; display: none;
+    }
+    .status-box.visible { display: block; }
+    .status-box.info { background: #eff6ff; border: 1px solid #bfdbfe; }
+    .status-box.success { background: #ecfdf5; border: 1px solid #a7f3d0; }
+    .status-box.error { background: #fef2f2; border: 1px solid #fecaca; }
+    .status-box h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+    .status-box p { font-size: 0.85rem; color: #374151; }
+    .status-box code {
+      background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;
+    }
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid #93c5fd; border-top-color: #2563eb;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+      margin-right: 0.5rem; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .history { margin-top: 2rem; border-top: 1px solid #e5e7eb; padding-top: 1.5rem; }
+    .history-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .history-header h2 { font-size: 1.05rem; color: #1b3a4b; }
+    .refresh-btn {
+      background: none; border: 1px solid #cbd5e1; border-radius: 6px;
+      color: #475569; font-size: 0.8rem; padding: 0.3rem 0.6rem; cursor: pointer;
+    }
+    .refresh-btn:hover { background: #f1f5f9; }
+    .history-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    .history-table th {
+      text-align: left; color: #6b7280; font-weight: 600;
+      padding: 0.5rem 0.6rem; border-bottom: 2px solid #e5e7eb;
+      white-space: nowrap;
+    }
+    .history-table td {
+      padding: 0.5rem 0.6rem; border-bottom: 1px solid #f1f5f9;
+      color: #374151; vertical-align: top;
+    }
+    .history-table td.file { font-weight: 600; color: #1e40af; word-break: break-all; }
+    .history-table tr:hover td { background: #fafbfc; }
+    .history-empty { color: #94a3b8; font-size: 0.85rem; padding: 0.75rem 0; }
+    .badge {
+      display: inline-block; background: #ecfdf5; color: #047857;
+      border: 1px solid #a7f3d0; border-radius: 999px;
+      padding: 1px 8px; font-size: 0.72rem; font-weight: 600;
+    }
+    .job-monitor {
+      margin-top: 1rem; padding: 1rem; border-radius: 8px;
+      background: #f8fafc; border: 1px solid #e2e8f0; display: none;
+    }
+    .job-monitor.visible { display: block; }
+    .job-monitor h3 { font-size: 0.9rem; color: #1b3a4b; margin-bottom: 0.5rem; }
+    .job-steps { list-style: none; padding: 0; }
+    .job-steps li {
+      padding: 0.4rem 0; font-size: 0.85rem; color: #475569;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .job-steps li .step-icon { font-size: 1rem; flex-shrink: 0; display: inline-block; }
+    .job-steps li .step-icon.pulsing { animation: pulse 1.4s ease-in-out infinite; }
+    .job-steps li .step-icon.blinking { animation: blink 0.6s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.15; } }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+    .job-steps li.active { color: #1e40af; font-weight: 600; }
+    .job-steps li.done { color: #047857; }
+    .job-steps li.failed { color: #dc2626; }
+    .job-progress {
+      margin-top: 0.75rem; height: 6px; border-radius: 3px;
+      background: #e2e8f0; overflow: hidden;
+    }
+    .job-progress-bar {
+      height: 100%; border-radius: 3px;
+      background: #3b82f6; transition: width 0.5s ease;
+    }
+    .job-progress-bar.success { background: #10b981; }
+    .job-progress-bar.error { background: #ef4444; }
+    .job-result {
+      margin-top: 0.5rem; font-size: 0.82rem; padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+    }
+    .job-result.success { background: #ecfdf5; color: #047857; }
+    .job-result.error { background: #fef2f2; color: #dc2626; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Excel Upload</h1>
+    <p class="subtitle">
+      Upload an Excel file to the Volume
+      <strong>my_catalog.my_schema.bloomberg_files</strong>.
+      Each file is stored under a unique name and the
+      <strong>Read Bloomberg Excel to Delta Table</strong> job runs automatically
+      to ingest it.
+    </p>
+    <div class="drop-zone" id="dropZone">
+      <div class="icon">📁</div>
+      <p>Drag &amp; drop your Excel file here, or <strong>click to browse</strong></p>
+      <p style="font-size:0.8rem;color:#94a3b8;margin-top:0.5rem">.xlsx or .xls files only</p>
+      <p class="file-name" id="fileName"></p>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+    <button class="btn btn-primary" id="uploadBtn" disabled>Upload to Volume</button>
+    <div class="status-box" id="statusBox">
+      <h3 id="statusTitle"></h3>
+      <p id="statusMsg"></p>
+    </div>
+
+    <div class="job-monitor" id="jobMonitor">
+      <h3>🔄 Job Execution Status</h3>
+      <ul class="job-steps">
+        <li id="stepUpload" class="done"><span class="step-icon">✅</span> File uploaded to Volume</li>
+        <li id="stepTrigger" class="done"><span class="step-icon">✅</span> Ingest job triggered</li>
+        <li id="stepRunning"><span class="step-icon" id="runningIcon">⏳</span> <span id="runningText">Job running...</span></li>
+        <li id="stepComplete"><span class="step-icon" id="completeIcon">⬜</span> <span id="completeText">Ingestion complete</span></li>
+      </ul>
+      <div class="job-progress"><div class="job-progress-bar" id="jobProgressBar" style="width:50%"></div></div>
+      <div class="job-result" id="jobResult" style="display:none"></div>
+    </div>
+
+    <div class="history">
+      <div class="history-header">
+        <h2>📜 Upload History</h2>
+        <button class="refresh-btn" id="refreshBtn" type="button">↻ Refresh</button>
+      </div>
+      <div id="historyBody">
+        <p class="history-empty">Loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const fileName = document.getElementById('fileName');
+    const statusBox = document.getElementById('statusBox');
+    const statusTitle = document.getElementById('statusTitle');
+    const statusMsg = document.getElementById('statusMsg');
+    const historyBody = document.getElementById('historyBody');
+    const refreshBtn = document.getElementById('refreshBtn');
+    let selectedFile = null;
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault(); dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => { if (fileInput.files[0]) selectFile(fileInput.files[0]); });
+
+    function selectFile(file) {
+      if (!file.name.match(/\.xlsx?$/i)) {
+        showStatus('error', 'Invalid File', 'Please select an Excel file (.xlsx or .xls)');
+        return;
+      }
+      selectedFile = file;
+      fileName.textContent = file.name;
+      dropZone.classList.add('has-file');
+      uploadBtn.disabled = false;
+      hideStatus();
+    }
+
+    async function parseResponse(resp) {
+      const text = await resp.text();
+      try { return JSON.parse(text); }
+      catch (e) { return { detail: text || `Server error (HTTP ${resp.status})` }; }
+    }
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Uploading...';
+      showStatus('info', '<span class="spinner"></span> Uploading...', `Sending ${selectedFile.name} to Volume`);
+
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+
+      try {
+        const resp = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await parseResponse(resp);
+        if (!resp.ok) throw new Error(data.detail || `Upload failed (HTTP ${resp.status})`);
+
+        showStatus('success', '✅ File Landed in Volume',
+          `<code>${data.original_name}</code> was saved as:<br><code>${data.file_name}</code><br><br>` +
+          (data.ingest_run_id != null
+            ? `The <strong>Read Bloomberg Excel to Delta Table</strong> job was triggered automatically (run <code>${data.ingest_run_id}</code>) to ingest this file.`
+            : `Note: the ingest job was not triggered automatically — run <strong>Read Bloomberg Excel to Delta Table</strong> manually.`));
+        resetUI();
+        loadHistory();
+
+        // Start real-time job status monitoring if job was triggered
+        if (data.ingest_run_id != null) {
+          startJobMonitor(data.ingest_run_id);
+        }
+      } catch (err) {
+        showStatus('error', 'Upload Failed', err.message);
+        resetUI();
+      }
+    });
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function formatSize(bytes) {
+      if (bytes == null || isNaN(bytes)) return '—';
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function formatTime(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return isNaN(d) ? escapeHtml(iso) : d.toLocaleString();
+    }
+
+    function renderHistory(records) {
+      if (!records || records.length === 0) {
+        historyBody.innerHTML = '<p class="history-empty">No uploads yet.</p>';
+        return;
+      }
+      const rows = records.map((r) => `
+        <tr>
+          <td>${formatTime(r.uploaded_at)}</td>
+          <td class="file">${escapeHtml(r.file_name ?? '—')}</td>
+          <td>${r.user ? escapeHtml(r.user) : '—'}</td>
+          <td>${formatSize(r.size_bytes)}</td>
+          <td><span class="badge">${escapeHtml(r.status ?? 'landed')}</span></td>
+        </tr>`).join('');
+      historyBody.innerHTML = `
+        <table class="history-table">
+          <thead>
+            <tr><th>Uploaded at</th><th>File</th><th>Uploaded by</th><th>Size</th><th>Status</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    async function loadHistory() {
+      try {
+        const resp = await fetch('/api/history');
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        renderHistory(data.history);
+      } catch (err) {
+        historyBody.innerHTML =
+          `<p class="history-empty">Could not load history: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    refreshBtn.addEventListener('click', loadHistory);
+    loadHistory();
+
+    // --- Job Monitor: real-time polling ---
+    const jobMonitor = document.getElementById('jobMonitor');
+    const stepRunning = document.getElementById('stepRunning');
+    const stepComplete = document.getElementById('stepComplete');
+    const runningIcon = document.getElementById('runningIcon');
+    const runningText = document.getElementById('runningText');
+    const completeIcon = document.getElementById('completeIcon');
+    const completeText = document.getElementById('completeText');
+    const jobProgressBar = document.getElementById('jobProgressBar');
+    const jobResult = document.getElementById('jobResult');
+    let pollTimer = null;
+
+    function resetJobMonitor() {
+      stepRunning.className = '';
+      stepComplete.className = '';
+      runningIcon.textContent = '⏳';
+      runningIcon.className = 'step-icon';
+      runningText.textContent = 'Job running...';
+      completeIcon.textContent = '⬜';
+      completeText.textContent = 'Ingestion complete';
+      jobProgressBar.style.width = '50%';
+      jobProgressBar.className = 'job-progress-bar';
+      jobResult.style.display = 'none';
+      jobResult.className = 'job-result';
+      jobResult.textContent = '';
+    }
+
+    function startJobMonitor(runId) {
+      resetJobMonitor();
+      jobMonitor.classList.add('visible');
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(() => pollJobStatus(runId), 3000);
+      // First poll immediately
+      pollJobStatus(runId);
+    }
+
+    async function pollJobStatus(runId) {
+      try {
+        const resp = await fetch(`/api/job-status/${runId}`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        updateJobMonitorUI(data);
+      } catch (err) {
+        // Network error — keep polling, don't crash
+        console.warn('Job status poll error:', err);
+      }
+    }
+
+    function updateJobMonitorUI(data) {
+      const { life_cycle_state, result_state, state_message } = data;
+
+      // Running states
+      if (['PENDING', 'QUEUED', 'BLOCKED'].includes(life_cycle_state)) {
+        stepRunning.className = 'active';
+        runningIcon.textContent = '⏳';
+        runningIcon.className = 'step-icon pulsing';
+        runningText.textContent = `Job ${life_cycle_state.toLowerCase()}...`;
+        jobProgressBar.style.width = '40%';
+      } else if (life_cycle_state === 'RUNNING') {
+        stepRunning.className = 'active';
+        runningIcon.textContent = '🔄';
+        runningIcon.className = 'step-icon blinking';
+        runningText.textContent = 'Job running...';
+        jobProgressBar.style.width = '65%';
+      } else if (life_cycle_state === 'TERMINATING') {
+        stepRunning.className = 'active';
+        runningIcon.textContent = '🔄';
+        runningIcon.className = 'step-icon blinking';
+        runningText.textContent = 'Job finishing up...';
+        jobProgressBar.style.width = '85%';
+      }
+
+      // Terminal states
+      if (life_cycle_state === 'TERMINATED' || life_cycle_state === 'INTERNAL_ERROR' || life_cycle_state === 'SKIPPED') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+
+        if (result_state === 'SUCCESS') {
+          stepRunning.className = 'done';
+          runningIcon.className = 'step-icon';
+          runningIcon.textContent = '✅';
+          runningText.textContent = 'Job executed successfully';
+          stepComplete.className = 'done';
+          completeIcon.textContent = '✅';
+          completeText.textContent = 'Ingestion complete';
+          jobProgressBar.style.width = '100%';
+          jobProgressBar.className = 'job-progress-bar success';
+          jobResult.style.display = 'block';
+          jobResult.className = 'job-result success';
+          jobResult.textContent = '🎉 Data has been ingested into the Delta table.';
+        } else {
+          // FAILED, TIMEDOUT, CANCELED, or INTERNAL_ERROR
+          stepRunning.className = 'failed';
+          runningIcon.className = 'step-icon';
+          runningIcon.textContent = '❌';
+          runningText.textContent = `Job ${(result_state || life_cycle_state || 'failed').toLowerCase()}`;
+          stepComplete.className = 'failed';
+          completeIcon.textContent = '❌';
+          completeText.textContent = 'Ingestion failed';
+          jobProgressBar.style.width = '100%';
+          jobProgressBar.className = 'job-progress-bar error';
+          jobResult.style.display = 'block';
+          jobResult.className = 'job-result error';
+          jobResult.textContent = state_message
+            ? `Error: ${state_message}`
+            : `Job ended with state: ${result_state || life_cycle_state}`;
+        }
+        // Refresh history to reflect updated status
+        loadHistory();
+      }
+    }
+
+    function showStatus(type, title, msg) {
+      statusBox.className = `status-box visible ${type}`;
+      statusTitle.innerHTML = title;
+      statusMsg.innerHTML = msg;
+    }
+    function hideStatus() { statusBox.className = 'status-box'; }
+    function resetUI() { uploadBtn.disabled = false; uploadBtn.textContent = 'Upload to Volume'; }
+  </script>
+</body>
+</html>

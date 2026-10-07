@@ -1,0 +1,11 @@
+command:
+  - python
+  - app.py
+
+env:
+  # SQL warehouse the app uses to read/write the upload_history Delta table.
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: '<YOUR_WAREHOUSE_ID>'
+  # Ingest job triggered after each upload (passes the file_name parameter).
+  - name: INGEST_JOB_ID
+    value: '<YOUR_INGEST_JOB_ID>'
