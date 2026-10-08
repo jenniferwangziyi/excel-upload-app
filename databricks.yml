@@ -1,0 +1,42 @@
+# Declarative Automation Bundle for the Excel upload & ingestion app.
+# See README.md for the full setup guide.
+bundle:
+  name: excel-upload-app
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Existing Unity Catalog catalog to deploy into.
+  schema:
+    description: Schema for the volume and tables (created by the setup job if missing).
+    default: excel_upload
+  volume:
+    description: Volume that stores the uploaded Excel files (created by the setup job if missing).
+    default: bloomberg_files
+  warehouse_id:
+    description: SQL warehouse the app uses to read/write the upload_history table.
+  app_name:
+    description: Databricks App name (lowercase letters, numbers and hyphens).
+    default: excel-upload
+
+targets:
+  # Deploys under your user folder; job names get a "[dev <you>]" prefix.
+  dev:
+    mode: development
+    default: true
+    variables:
+      catalog: my_catalog            # <-- change me
+      warehouse_id: <YOUR_WAREHOUSE_ID>  # <-- change me
+
+  # Deployment for real use: no name prefixes, deployed under the deployer's
+  # /Workspace/Users/<deployer>/.bundle folder. Deploy as a service principal
+  # for production (see README).
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      catalog: my_catalog            # <-- change me
+      warehouse_id: <YOUR_WAREHOUSE_ID>  # <-- change me

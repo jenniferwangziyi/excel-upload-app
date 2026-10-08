@@ -136,7 +136,7 @@
     <h1>📊 Excel Upload</h1>
     <p class="subtitle">
       Upload an Excel file to the Volume
-      <strong>my_catalog.my_schema.bloomberg_files</strong>.
+      <strong id="volumeName">…</strong>.
       Each file is stored under a unique name and the
       <strong>Read Bloomberg Excel to Delta Table</strong> job runs automatically
       to ingest it and run a data quality check.
@@ -304,6 +304,11 @@
     refreshBtn.addEventListener('click', loadHistory);
     loadHistory();
 
+    fetch('/api/config')
+      .then((r) => r.json())
+      .then((c) => { document.getElementById('volumeName').textContent = c.volume; })
+      .catch(() => { document.getElementById('volumeName').textContent = 'the configured volume'; });
+
     // --- Job Monitor: real-time polling ---
     const jobMonitor = document.getElementById('jobMonitor');
     const stepRunning = document.getElementById('stepRunning');
@@ -352,7 +357,7 @@
       }
     }
 
-    // Task keys in the ingest job (see README, step 5).
+    // Task keys in the ingest job (resources/ingest.job.yml).
     const INGEST_TASK = 'ingest';
     const QUALITY_TASK = 'quality_check';
 

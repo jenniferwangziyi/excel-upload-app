@@ -1,0 +1,21 @@
+resources:
+  jobs:
+    setup:
+      name: Excel Upload - setup
+      # Run once after the first deploy (and again after changing catalog/schema/volume):
+      #   databricks bundle run setup
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: volume
+          default: ${var.volume}
+        - name: app_name
+          default: ${resources.apps.excel_upload.name}
+
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/notebooks/setup.py
+          disable_auto_optimization: true

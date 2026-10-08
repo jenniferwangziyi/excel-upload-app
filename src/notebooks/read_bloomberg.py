@@ -18,10 +18,21 @@
 # COMMAND ----------
 
 # DBTITLE 1,Configuration
-# Unity Catalog locations — change these to match your environment.
-volume_path = "/Volumes/my_catalog/my_schema/bloomberg_files/"
-history_table = "my_catalog.my_schema.upload_history"
-table_name = "my_catalog.my_schema.bloomberg_consensus_model"
+# Unity Catalog locations come from job parameters (set by the bundle). The
+# defaults here only apply when running the notebook interactively.
+dbutils.widgets.text("catalog", "my_catalog", "Catalog")
+dbutils.widgets.text("schema", "excel_upload", "Schema")
+dbutils.widgets.text("volume", "bloomberg_files", "Volume")
+# Name of the Excel file (in the Volume) to ingest. The app passes it in; leave
+# blank to automatically pick the most recently modified file.
+dbutils.widgets.text("file_name", "", "Excel file name")
+
+catalog = dbutils.widgets.get("catalog").strip()
+schema = dbutils.widgets.get("schema").strip()
+volume = dbutils.widgets.get("volume").strip()
+volume_path = f"/Volumes/{catalog}/{schema}/{volume}/"
+history_table = f"`{catalog}`.`{schema}`.upload_history"
+table_name = f"`{catalog}`.`{schema}`.bloomberg_consensus_model"
 
 # Markers that appear in the source Excel content. They are matched literally
 # against the workbook, so keep them in the language the workbook uses.
@@ -36,13 +47,6 @@ ESTIMATE_SUFFIX = "預估"      # Suffix on period headers that hold estimates (
 # MAGIC %md
 # MAGIC ### Step 1: List Files in the Volume
 # MAGIC We first explore the UC Volume to identify the Excel file we want to ingest.
-
-# COMMAND ----------
-
-# DBTITLE 1,File name parameter
-# Job parameter: name of the Excel file (in the Volume) to ingest.
-# Leave blank to automatically pick the most recently modified file.
-dbutils.widgets.text("file_name", "", "Excel file name")
 
 # COMMAND ----------
 

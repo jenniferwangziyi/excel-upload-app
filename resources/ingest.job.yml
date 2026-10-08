@@ -1,0 +1,32 @@
+resources:
+  jobs:
+    ingest:
+      name: Read Bloomberg Excel to Delta Table
+      # Triggered by the app after each upload (it passes file_name). Runs one
+      # upload at a time; extra uploads wait in the queue.
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+
+      parameters:
+        - name: file_name
+          default: ""
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: volume
+          default: ${var.volume}
+
+      tasks:
+        - task_key: ingest
+          notebook_task:
+            notebook_path: ../src/notebooks/read_bloomberg.py
+
+        - task_key: quality_check
+          depends_on:
+            - task_key: ingest
+          notebook_task:
+            notebook_path: ../src/notebooks/quality_check.py
+          # A failed check is deterministic; don't let serverless retry it.
+          disable_auto_optimization: true

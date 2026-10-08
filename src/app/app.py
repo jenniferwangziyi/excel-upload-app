@@ -26,20 +26,25 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Excel Upload")
 
-# Configuration
+# Configuration — CATALOG / SCHEMA / VOLUME are set by the bundle
+# (resources/excel_upload.app.yml) from the bundle variables.
+CATALOG = os.environ.get("CATALOG", "")
+SCHEMA = os.environ.get("SCHEMA", "")
+VOLUME = os.environ.get("VOLUME", "")
+
 # Land files in the same Volume the "Read Bloomberg Excel to Delta Table"
 # notebook reads from, so the triggered job picks up uploaded files.
-VOLUME_PATH = "/Volumes/my_catalog/my_schema/bloomberg_files"
+VOLUME_PATH = f"/Volumes/{CATALOG}/{SCHEMA}/{VOLUME}"
 
 # Upload history lives in a Delta table in the same schema as the data. The app
 # writes one row per upload and reads it back ordered by most-recent-first.
-HISTORY_TABLE = "my_catalog.my_schema.upload_history"
+HISTORY_TABLE = f"`{CATALOG}`.`{SCHEMA}`.upload_history"
 
-# SQL warehouse used to read/write the history table. Set in app.yaml; the app's
+# SQL warehouse used to read/write the history table. Set by the bundle; the app's
 # service principal has CAN_USE on it and SELECT/MODIFY on the table.
 WAREHOUSE_ID = os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
 
-# Ingest job triggered after each upload. Set in app.yaml; the app's service
+# Ingest job triggered after each upload. Set by the bundle; the app's service
 # principal has CAN_MANAGE_RUN on it. The job takes a `file_name` parameter.
 INGEST_JOB_ID = os.environ.get("INGEST_JOB_ID", "")
 
@@ -314,6 +319,12 @@ async def job_status(run_id: int):
             status_code=500,
             detail=f"Failed to get job run status: {str(e)}"
         )
+
+
+@app.get("/api/config")
+async def config():
+    """Return display configuration for the UI."""
+    return {"volume": f"{CATALOG}.{SCHEMA}.{VOLUME}"}
 
 
 @app.get("/api/history")

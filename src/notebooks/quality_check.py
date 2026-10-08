@@ -20,8 +20,12 @@
 # COMMAND ----------
 
 # DBTITLE 1,Configuration
-# Table written by the ingest task — change this to match your environment.
-table_name = "my_catalog.my_schema.bloomberg_consensus_model"
+# Catalog and schema come from job parameters (set by the bundle). The defaults
+# here only apply when running the notebook interactively.
+dbutils.widgets.text("catalog", "my_catalog", "Catalog")
+dbutils.widgets.text("schema", "excel_upload", "Schema")
+dbutils.widgets.text("file_name", "", "Excel file name")
+table_name = f"`{dbutils.widgets.get('catalog').strip()}`.`{dbutils.widgets.get('schema').strip()}`.bloomberg_consensus_model"
 
 # Expected batch_key format: a regex whose first group is the date part, and the
 # datetime pattern (Spark syntax) that date part must parse with.
@@ -35,8 +39,6 @@ INGEST_TASK_KEY = "ingest"
 
 # DBTITLE 1,Resolve which rows to check
 from urllib.parse import unquote
-
-dbutils.widgets.text("file_name", "", "Excel file name")
 
 # In a job run, check only the file the ingest task just wrote. When run
 # interactively there is no upstream task, so fall back to the file_name widget,

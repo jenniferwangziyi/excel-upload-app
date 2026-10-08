@@ -1,0 +1,38 @@
+resources:
+  apps:
+    excel_upload:
+      name: ${var.app_name}
+      description: Upload Excel files to a UC volume and ingest them into a Delta table, with a data quality check.
+      source_code_path: ../src/app
+
+      # Replaces app.yaml: start command and environment variables.
+      config:
+        command: ["python", "app.py"]
+        env:
+          - name: CATALOG
+            value: ${var.catalog}
+          - name: SCHEMA
+            value: ${var.schema}
+          - name: VOLUME
+            value: ${var.volume}
+          - name: DATABRICKS_WAREHOUSE_ID
+            value_from: sql-warehouse
+          - name: INGEST_JOB_ID
+            value_from: ingest-job
+
+      # Declaring these grants the app's service principal access automatically.
+      # Unity Catalog grants (volume, upload_history) are done by the setup job,
+      # because those objects don't exist yet on the first deploy.
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: ingest-job
+          job:
+            id: ${resources.jobs.ingest.id}
+            permission: CAN_MANAGE_RUN
+
+      permissions:
+        - level: CAN_USE
+          group_name: users
