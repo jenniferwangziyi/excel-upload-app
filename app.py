@@ -4,7 +4,7 @@ FastAPI backend that accepts Excel file uploads and saves them to a Unity
 Catalog Volume. Each upload is stored under a unique name (original name +
 uploader + timestamp) so uploads never overwrite one another, and it then
 automatically triggers the "Read Bloomberg Excel to Delta Table" job to ingest
-that specific file into the Delta table.
+that specific file into the Delta table and run a data quality check on it.
 """
 
 import io
@@ -278,11 +278,35 @@ async def job_status(run_id: int):
         result_state = state.result_state.value if state.result_state else None
         life_cycle_state = state.life_cycle_state.value if state.life_cycle_state else None
         state_message = state.state_message or ""
+        # Per-task states so the UI can tell ingest and quality_check apart.
+        tasks = {}
+        # A retried task appears once per attempt; keep only the latest attempt.
+        latest = {}
+        for t in run.tasks or []:
+            prev = latest.get(t.task_key)
+            if prev is None or (t.attempt_number or 0) >= (prev.attempt_number or 0):
+                latest[t.task_key] = t
+        for t in latest.values():
+            ts = t.state
+            task_result = ts.result_state.value if ts and ts.result_state else None
+            error = None
+            if task_result == "FAILED" and t.run_id:
+                # The run-level message is generic; the task output has the real error.
+                try:
+                    error = w.jobs.get_run_output(run_id=t.run_id).error
+                except Exception as e:
+                    logger.warning(f"Could not fetch output for task {t.task_key}: {e}")
+            tasks[t.task_key] = {
+                "life_cycle_state": ts.life_cycle_state.value if ts and ts.life_cycle_state else None,
+                "result_state": task_result,
+                "error": error,
+            }
         return {
             "run_id": run_id,
             "life_cycle_state": life_cycle_state,
             "result_state": result_state,
             "state_message": state_message,
+            "tasks": tasks,
         }
     except Exception as e:
         logger.error(f"Failed to get job run status for run_id={run_id}: {e}")

@@ -11,6 +11,24 @@
 # MAGIC 2. Read the first sheet of an Excel file using Spark
 # MAGIC 3. Preview the data
 # MAGIC 4. Write it as a managed Delta table
+# MAGIC
+# MAGIC It runs as the `ingest` task of the ingest job. The `quality_check` task
+# MAGIC (`quality_check` notebook) runs after it and validates the rows written here.
+
+# COMMAND ----------
+
+# DBTITLE 1,Configuration
+# Unity Catalog locations — change these to match your environment.
+volume_path = "/Volumes/my_catalog/my_schema/bloomberg_files/"
+history_table = "my_catalog.my_schema.upload_history"
+table_name = "my_catalog.my_schema.bloomberg_consensus_model"
+
+# Markers that appear in the source Excel content. They are matched literally
+# against the workbook, so keep them in the language the workbook uses.
+START_MARKER = "文字版本"     # Column-B row marking where the data block starts ("text version")
+END_MARKER = "圖"             # Column-B row marking where the data block ends ("chart")
+METRIC_COL_MARKER = "單位"    # Substring of the metric/label column header ("unit")
+ESTIMATE_SUFFIX = "預估"      # Suffix on period headers that hold estimates ("estimate")
 
 # COMMAND ----------
 
@@ -30,7 +48,6 @@ dbutils.widgets.text("file_name", "", "Excel file name")
 
 # DBTITLE 1,List volume files
 # List files in the Bloomberg volume
-volume_path = "/Volumes/my_catalog/my_schema/bloomberg_files/"
 files = dbutils.fs.ls(volume_path)
 display(files)
 
@@ -78,44 +95,44 @@ from datetime import datetime
 
 # excel_file was resolved from the file_name parameter (or latest file) above.
 
-# --- 解析 Sheet 名稱取得資料版本日期 (格式: BLB_YYMMDD) ---
+# --- Parse the data version date from the sheet name (format: BLB_YYMMDD) ---
 xl = pd.ExcelFile(excel_file)
 sheet_name = xl.sheet_names[0]
 print(f"📄 Sheet name: {sheet_name}")
 
-# 從 sheet 名稱中提取日期 (YYMMDD)
+# Extract the date (YYMMDD) from the sheet name
 date_match = re.search(r'(\d{6})', sheet_name)
 if date_match:
     date_str = date_match.group(1)
     batch_date = datetime.strptime(date_str, "%y%m%d").date()
-    print(f"📅 資料批次日期: {batch_date} (parsed from '{sheet_name}')")
+    print(f"📅 Batch date: {batch_date} (parsed from '{sheet_name}')")
 else:
     batch_date = None
-    print(f"⚠️ 無法從 sheet 名稱 '{sheet_name}' 解析日期")
+    print(f"⚠️ Could not parse a date from sheet name '{sheet_name}'")
 
 # Read the sheet; use row 4 (index 3) as the header
 # Only read columns B:L (financial data)
 pdf = pd.read_excel(xl, sheet_name=0, header=3, usecols="B:L")
 
-# --- 只保留 B 欄中「文字版本」與「圖」之間的資料 ---
+# --- Keep only the rows between the START_MARKER and END_MARKER rows in column B ---
 first_col = pdf.columns[0]
 col_b = pdf[first_col].astype(str).str.strip()
 
-# 找到「文字版本」標記列（資料從其下一列開始）
-start_mask = col_b.eq("文字版本")
-# 找到「圖」標記列（資料到其前一列結束）
-end_mask = col_b.eq("圖")
+# Data starts on the row after START_MARKER
+start_mask = col_b.eq(START_MARKER)
+# Data ends on the row before END_MARKER
+end_mask = col_b.eq(END_MARKER)
 
 start_idx = start_mask.idxmax() + 1 if start_mask.any() else 0
 end_idx = end_mask.idxmax() if end_mask.any() else len(pdf)
 
 pdf = pdf.iloc[start_idx:end_idx].reset_index(drop=True)
-print(f"✂️ 擷取「文字版本」(row {start_idx}) 至「圖」(row {end_idx}) 之間的資料: {len(pdf)} 列")
+print(f"✂️ Kept rows between '{START_MARKER}' (row {start_idx}) and '{END_MARKER}' (row {end_idx}): {len(pdf)} rows")
 
-# --- 移除 B 欄（第一欄）為空的列 ---
+# --- Drop rows where column B (the first column) is empty ---
 before = len(pdf)
 pdf = pdf[pdf[first_col].notna() & (pdf[first_col].astype(str).str.strip() != "") & (pdf[first_col].astype(str).str.strip().str.lower() != "nan")].reset_index(drop=True)
-print(f"🗑️ 移除 B 欄為空的列: {before - len(pdf)} 列")
+print(f"🗑️ Dropped rows with an empty column B: {before - len(pdf)} rows")
 
 # Convert mixed-type object columns to string for Arrow compatibility
 for col in pdf.select_dtypes(include=['object']).columns:
@@ -154,15 +171,15 @@ from pyspark.sql import functions as F
 
 # ---------------------------------------------------------------------------
 # Dynamic column parsing — no hard-coded mapping needed
-# Pattern: "Q{1-4} {year}" | "Q{1-4} {year} 預估" | "FY {year}" | "FY {year} 預估"
+# Pattern: "Q{1-4} {year}" | "Q{1-4} {year} <ESTIMATE_SUFFIX>" | "FY {year}" | "FY {year} <ESTIMATE_SUFFIX>"
 # ---------------------------------------------------------------------------
-period_pattern = re.compile(r'^(Q[1-4]|FY)\s+(\d{4})(\s+預估)?$')
+period_pattern = re.compile(rf'^(Q[1-4]|FY)\s+(\d{{4}})(\s+{ESTIMATE_SUFFIX})?$')
 
 metric_col = None
 period_cols = []
 
 for col_name in df.columns:
-    if "單位" in col_name:
+    if METRIC_COL_MARKER in col_name:
         metric_col = col_name
     elif period_pattern.match(col_name.strip()):
         period_cols.append(col_name)
@@ -170,16 +187,16 @@ for col_name in df.columns:
         print(f"⚠️ Unrecognized column (skipped): {col_name}")
 
 if not metric_col:
-    raise ValueError("Cannot find metric column (expected a column containing '單位')")
+    raise ValueError(f"Cannot find metric column (expected a column containing '{METRIC_COL_MARKER}')")
 
 print(f"✅ Metric column: '{metric_col}'")
 print(f"✅ Period columns ({len(period_cols)}): {period_cols}")
 
 # ---------------------------------------------------------------------------
-# Data Version: 取「Q{1-4} {year} 預估」欄位中最小季度作為資料版本鍵
-# 格式: V_Q{min_quarter}_{year}_ESTIMATE
+# Data version: the earliest "Q{1-4} {year} <ESTIMATE_SUFFIX>" column is the version key
+# Format: V_Q{min_quarter}_{year}_ESTIMATE
 # ---------------------------------------------------------------------------
-estimate_pattern = re.compile(r'^Q([1-4])\s+(\d{4})\s+預估$')
+estimate_pattern = re.compile(rf'^Q([1-4])\s+(\d{{4}})\s+{ESTIMATE_SUFFIX}$')
 estimate_cols_parsed = []
 for c in period_cols:
     m = estimate_pattern.match(c.strip())
@@ -187,9 +204,9 @@ for c in period_cols:
         estimate_cols_parsed.append((int(m.group(1)), int(m.group(2)), c))
 
 if not estimate_cols_parsed:
-    raise ValueError("No estimate columns (Q{1-4} {year} 預估) found — cannot derive data_version")
+    raise ValueError(f"No estimate columns (Q{{1-4}} {{year}} {ESTIMATE_SUFFIX}) found — cannot derive data_version")
 
-# 取時間最早的預估季度（先比年份再比季度，如 2026Q2 < 2027Q1）
+# Take the earliest estimated quarter (compare year first, then quarter; e.g. 2026Q2 < 2027Q1)
 estimate_cols_parsed.sort(key=lambda x: (x[1], x[0]))
 min_quarter, min_year, _ = estimate_cols_parsed[0]
 data_version = f"V_Q{min_quarter}_{min_year}_ESTIMATE"
@@ -210,7 +227,7 @@ df_long = df.select(
 
 # ---------------------------------------------------------------------------
 # Parse period_raw → period_type, year, quarter, is_estimate
-#   period_type: "Q" = 季, "FY" = 年加總
+#   period_type: "Q" = quarter, "FY" = full-year total
 #   quarter: 1-4 for Q, null for FY
 # ---------------------------------------------------------------------------
 df_long = (
@@ -227,17 +244,16 @@ df_long = (
                F.regexp_extract("period_raw", r"Q(\d)", 1).cast("int"))
     )
     .withColumn("is_estimate",
-        F.col("period_raw").contains("預估")
+        F.col("period_raw").contains(ESTIMATE_SUFFIX)
     )
     .drop("period_raw")
-    .withColumn("value", F.expr("try_cast(value as decimal(38,7)) * 1000000"))  # 百萬 → 元，溢位回傳 NULL
-    .filter(F.col("value").isNotNull())  # 移除非數值或溢位資料（例如重複的標題列）
+    .withColumn("value", F.expr("try_cast(value as decimal(38,7)) * 1000000"))  # millions → units; NULL on overflow
+    .filter(F.col("value").isNotNull())  # drop non-numeric or overflowing values (e.g. repeated header rows)
 )
 
 # ---------------------------------------------------------------------------
 # Metadata: source file + uploader info
 # ---------------------------------------------------------------------------
-history_table = "my_catalog.my_schema.upload_history"
 upload_user = None
 upload_datetime = None
 try:
@@ -256,7 +272,7 @@ except Exception as e:
 
 df_final = (
     df_long
-    .withColumn("data_version", F.lit(data_version))  # 預估最小季度作為版本鍵
+    .withColumn("data_version", F.lit(data_version))  # earliest estimated quarter as the version key
     .withColumn("source_file", F.lit(file_name))
     .withColumn("upload_user", F.lit(upload_user))
     .withColumn("upload_datetime", F.lit(upload_datetime).cast("timestamp"))
@@ -264,16 +280,14 @@ df_final = (
 )
 
 # ---------------------------------------------------------------------------
-# Write to Delta table — 以 batch_key (= sheet_name) 判斷是否重複匯入
-# 邏輯:
-#   1. 若表不存在 → 直接建表
-#   2. 若同 batch_key 不存在 → 直接 append
-#   3. 若同 batch_key 已存在 → 刪除舊資料再匯入
+# Write to Delta table — use batch_key (= sheet_name) to detect re-imports
+# Logic:
+#   1. Table does not exist        → create it
+#   2. batch_key not yet present   → append
+#   3. batch_key already present   → delete the old rows, then append
 # ---------------------------------------------------------------------------
-table_name = "my_catalog.my_schema.bloomberg_consensus_model"
-
 if spark.catalog.tableExists(table_name):
-    # 查詢同 batch_key 的現有資料
+    # Count existing rows for this batch_key
     existing_count = (
         spark.table(table_name)
         .where(F.col("batch_key") == batch_key)
@@ -281,27 +295,30 @@ if spark.catalog.tableExists(table_name):
     )
 
     if existing_count > 0:
-        # 同 batch_key 已存在 → 刪除後重新匯入
-        spark.sql(f"DELETE FROM {table_name} WHERE batch_key = '{batch_key}'")
-        print(f"🗑️ 已刪除 batch_key='{batch_key}' 舊資料: {existing_count} 筆")
+        # batch_key already present → delete, then re-import
+        spark.sql(f"DELETE FROM {table_name} WHERE batch_key = :batch_key", args={"batch_key": batch_key})
+        print(f"🗑️ Deleted {existing_count} existing rows for batch_key='{batch_key}'")
         df_final.write.mode("append").saveAsTable(table_name)
         new_count = df_final.count()
-        print(f"✅ 重新寫入 {new_count} 筆資料 (batch_key='{batch_key}')")
+        print(f"✅ Re-wrote {new_count} rows (batch_key='{batch_key}')")
     else:
-        # 同 batch_key 不存在 → 直接 append
+        # New batch_key → append
         df_final.write.mode("append").saveAsTable(table_name)
         new_count = df_final.count()
-        print(f"✅ 寫入 {new_count} 筆資料 (batch_key='{batch_key}' 首次匯入)")
+        print(f"✅ Wrote {new_count} rows (batch_key='{batch_key}', first import)")
 else:
-    # 首次建表
+    # First run: create the table
     df_final.write.mode("overwrite").saveAsTable(table_name)
     new_count = df_final.count()
-    print(f"🆕 首次建立表: {table_name}")
-    print(f"✅ 寫入 {new_count} 筆資料")
+    print(f"🆕 Created table: {table_name}")
+    print(f"✅ Wrote {new_count} rows")
 
 print(f"   data_version={data_version}")
 print(f"   batch_key={batch_key}")
 print(f"   source_file={file_name}, upload_user={upload_user}")
+
+# Hand the ingested file to the downstream quality_check task.
+dbutils.jobs.taskValues.set(key="source_file", value=file_name)
 
 # COMMAND ----------
 

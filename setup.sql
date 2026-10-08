@@ -1,57 +1,60 @@
 -- ============================================================
--- Excel Upload App - 環境初始化腳本
--- 部署前請先修改以下三個參數，再逐段執行
+-- Excel Upload App - environment setup script
+-- Replace <YOUR_CATALOG>, <YOUR_SCHEMA> and <YOUR_VOLUME> below,
+-- then run each statement in order.
 -- ============================================================
 
--- >>> 修改此處 <<<
--- SET CATALOG = my_catalog;
--- SET SCHEMA  = my_schema;
--- SET VOLUME  = bloomberg_files;
+-- >>> Example values <<<
+--   <YOUR_CATALOG> = my_catalog
+--   <YOUR_SCHEMA>  = my_schema
+--   <YOUR_VOLUME>  = bloomberg_files
 
--- 1. 建立 Catalog（若已存在可跳過）
-CREATE CATALOG IF NOT EXISTS <您的_CATALOG>;
+-- 1. Create the catalog (skip if it already exists)
+CREATE CATALOG IF NOT EXISTS <YOUR_CATALOG>;
 
--- 2. 建立 Schema
-CREATE SCHEMA IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>;
+-- 2. Create the schema
+CREATE SCHEMA IF NOT EXISTS <YOUR_CATALOG>.<YOUR_SCHEMA>;
 
--- 3. 建立 Volume（用於存放上傳的 Excel 檔案）
-CREATE VOLUME IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.<您的_VOLUME>
-  COMMENT '存放使用者上傳的 Excel 檔案';
+-- 3. Create the volume (stores the uploaded Excel files)
+CREATE VOLUME IF NOT EXISTS <YOUR_CATALOG>.<YOUR_SCHEMA>.<YOUR_VOLUME>
+  COMMENT 'Excel files uploaded through the app';
 
--- 4. 建立上傳歷史紀錄表
-CREATE TABLE IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.upload_history (
-  file_name     STRING    COMMENT '上傳的檔案名稱',
-  uploaded_by   STRING    COMMENT '上傳者身份',
-  size_bytes    BIGINT    COMMENT '檔案大小（bytes）',
-  status        STRING    COMMENT '狀態（landed / ingested）',
-  uploaded_at   TIMESTAMP COMMENT '上傳時間'
+-- 4. Create the upload history table
+CREATE TABLE IF NOT EXISTS <YOUR_CATALOG>.<YOUR_SCHEMA>.upload_history (
+  file_name     STRING    COMMENT 'Uploaded file name (unique name stored in the volume)',
+  uploaded_by   STRING    COMMENT 'Identity of the uploader',
+  size_bytes    BIGINT    COMMENT 'File size in bytes',
+  status        STRING    COMMENT 'Status (landed / ingested)',
+  uploaded_at   TIMESTAMP COMMENT 'Upload time'
 )
-COMMENT '記錄每次 Excel 上傳的歷史';
+COMMENT 'One row per Excel upload';
 
--- 5. 匯入目標表 bloomberg_consensus_model（正規化長表）
---    read_bloomberg Notebook 會動態解析 Excel 欄位並 unpivot 後寫入；
---    以 batch_key（= Sheet 名稱）去重：同批次先刪除再寫入，新批次 append。
---    欄位與型別須與 Notebook 輸出一致（含 data_version、batch_key，value 為 DECIMAL(38,7)）。
---    Schema 固定，未來新增季度不需調整。
---    可預先建立，或由 Notebook 首次執行時自動建立。
-CREATE TABLE IF NOT EXISTS <您的_CATALOG>.<您的_SCHEMA>.bloomberg_consensus_model (
-  metric           STRING    COMMENT '指標名稱（如營收、毛利率）',
-  period_type      STRING    COMMENT '期間類型：Q=季, FY=年加總',
-  year             INT       COMMENT '年度',
-  quarter          INT       COMMENT '季度 (1-4)，FY 時為 null',
-  is_estimate      BOOLEAN   COMMENT '是否為預估值',
-  value            DECIMAL(38,7) COMMENT '數值（單位：新台幣元 NTD；Excel 原始單位為百萬，Notebook 已 ×1,000,000）',
-  source_file      STRING    COMMENT '來源檔名',
-  upload_user      STRING    COMMENT '上傳者',
-  upload_datetime  TIMESTAMP COMMENT '上傳時間',
-  data_version     STRING    COMMENT '資料版本鍵(格式: V_Q{quarter}_{year}_ESTIMATE)',
-  batch_key        STRING    COMMENT '批次鍵 (Sheet 名稱，如 BLB_260723)'
+-- 5. Ingest target table bloomberg_consensus_model (normalized long table)
+--    The read_bloomberg notebook parses the Excel headers dynamically, unpivots,
+--    and writes here. It de-duplicates on batch_key (= sheet name): an existing
+--    batch is deleted and re-written, a new batch is appended.
+--    Columns and types must match the notebook output (including data_version
+--    and batch_key; value is DECIMAL(38,7)). The schema is fixed — new quarters
+--    in the Excel need no change here.
+--    You can create the table up front, or let the notebook create it on its first run.
+CREATE TABLE IF NOT EXISTS <YOUR_CATALOG>.<YOUR_SCHEMA>.bloomberg_consensus_model (
+  metric           STRING        COMMENT 'Metric name (e.g. revenue, gross margin)',
+  period_type      STRING        COMMENT 'Period type: Q = quarter, FY = full-year total',
+  year             INT           COMMENT 'Year',
+  quarter          INT           COMMENT 'Quarter (1-4), NULL for FY',
+  is_estimate      BOOLEAN       COMMENT 'Whether the value is an estimate',
+  value            DECIMAL(38,7) COMMENT 'Value in units (Excel values are in millions and the notebook multiplies by 1,000,000)',
+  source_file      STRING        COMMENT 'Source file name',
+  upload_user      STRING        COMMENT 'Uploader',
+  upload_datetime  TIMESTAMP     COMMENT 'Upload time',
+  data_version     STRING        COMMENT 'Data version key (format: V_Q{quarter}_{year}_ESTIMATE)',
+  batch_key        STRING        COMMENT 'Batch key (sheet name, e.g. BLB_260723)'
 )
-COMMENT 'Bloomberg consensus model - 正規化長表（動態解析 Excel 欄位後 unpivot）';
+COMMENT 'Bloomberg consensus model - normalized long table (Excel headers parsed dynamically, then unpivoted)';
 
---    若要重建表結構（清空所有資料），可執行：
---    DROP TABLE IF EXISTS <您的_CATALOG>.<您的_SCHEMA>.bloomberg_consensus_model;
+--    To rebuild the table from scratch (deletes all data):
+--    DROP TABLE IF EXISTS <YOUR_CATALOG>.<YOUR_SCHEMA>.bloomberg_consensus_model;
 
--- 6. 驗證建立成功
-SHOW TABLES IN <您的_CATALOG>.<您的_SCHEMA>;
-SHOW VOLUMES IN <您的_CATALOG>.<您的_SCHEMA>;
+-- 6. Verify
+SHOW TABLES IN <YOUR_CATALOG>.<YOUR_SCHEMA>;
+SHOW VOLUMES IN <YOUR_CATALOG>.<YOUR_SCHEMA>;

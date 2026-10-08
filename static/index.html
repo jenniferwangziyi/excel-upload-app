@@ -139,7 +139,7 @@
       <strong>my_catalog.my_schema.bloomberg_files</strong>.
       Each file is stored under a unique name and the
       <strong>Read Bloomberg Excel to Delta Table</strong> job runs automatically
-      to ingest it.
+      to ingest it and run a data quality check.
     </p>
     <div class="drop-zone" id="dropZone">
       <div class="icon">📁</div>
@@ -159,8 +159,8 @@
       <ul class="job-steps">
         <li id="stepUpload" class="done"><span class="step-icon">✅</span> File uploaded to Volume</li>
         <li id="stepTrigger" class="done"><span class="step-icon">✅</span> Ingest job triggered</li>
-        <li id="stepRunning"><span class="step-icon" id="runningIcon">⏳</span> <span id="runningText">Job running...</span></li>
-        <li id="stepComplete"><span class="step-icon" id="completeIcon">⬜</span> <span id="completeText">Ingestion complete</span></li>
+        <li id="stepRunning"><span class="step-icon" id="runningIcon">⏳</span> <span id="runningText">Ingesting data...</span></li>
+        <li id="stepComplete"><span class="step-icon" id="completeIcon">⬜</span> <span id="completeText">Data quality check</span></li>
       </ul>
       <div class="job-progress"><div class="job-progress-bar" id="jobProgressBar" style="width:50%"></div></div>
       <div class="job-result" id="jobResult" style="display:none"></div>
@@ -321,9 +321,9 @@
       stepComplete.className = '';
       runningIcon.textContent = '⏳';
       runningIcon.className = 'step-icon';
-      runningText.textContent = 'Job running...';
+      runningText.textContent = 'Ingesting data...';
       completeIcon.textContent = '⬜';
-      completeText.textContent = 'Ingestion complete';
+      completeText.textContent = 'Data quality check';
       jobProgressBar.style.width = '50%';
       jobProgressBar.className = 'job-progress-bar';
       jobResult.style.display = 'none';
@@ -352,63 +352,70 @@
       }
     }
 
+    // Task keys in the ingest job (see README, step 5).
+    const INGEST_TASK = 'ingest';
+    const QUALITY_TASK = 'quality_check';
+
+    function setStep(li, icon, text, cls, iconText, label, iconCls = 'step-icon') {
+      li.className = cls;
+      icon.className = iconCls;
+      icon.textContent = iconText;
+      text.textContent = label;
+    }
+
     function updateJobMonitorUI(data) {
       const { life_cycle_state, result_state, state_message } = data;
+      const tasks = data.tasks || {};
+      const ingest = tasks[INGEST_TASK] || {};
+      const quality = tasks[QUALITY_TASK] || {};
+      const ingestDone = ingest.result_state === 'SUCCESS';
 
       // Running states
-      if (['PENDING', 'QUEUED', 'BLOCKED'].includes(life_cycle_state)) {
-        stepRunning.className = 'active';
-        runningIcon.textContent = '⏳';
-        runningIcon.className = 'step-icon pulsing';
-        runningText.textContent = `Job ${life_cycle_state.toLowerCase()}...`;
-        jobProgressBar.style.width = '40%';
-      } else if (life_cycle_state === 'RUNNING') {
-        stepRunning.className = 'active';
-        runningIcon.textContent = '🔄';
-        runningIcon.className = 'step-icon blinking';
-        runningText.textContent = 'Job running...';
-        jobProgressBar.style.width = '65%';
-      } else if (life_cycle_state === 'TERMINATING') {
-        stepRunning.className = 'active';
-        runningIcon.textContent = '🔄';
-        runningIcon.className = 'step-icon blinking';
-        runningText.textContent = 'Job finishing up...';
-        jobProgressBar.style.width = '85%';
+      if (['PENDING', 'QUEUED', 'BLOCKED', 'RUNNING', 'TERMINATING'].includes(life_cycle_state)) {
+        if (ingestDone) {
+          setStep(stepRunning, runningIcon, runningText, 'done', '✅', 'Data ingested');
+          setStep(stepComplete, completeIcon, completeText, 'active', '🔄', 'Running data quality check...', 'step-icon blinking');
+          jobProgressBar.style.width = '85%';
+        } else if (life_cycle_state === 'RUNNING' || life_cycle_state === 'TERMINATING') {
+          setStep(stepRunning, runningIcon, runningText, 'active', '🔄', 'Ingesting data...', 'step-icon blinking');
+          jobProgressBar.style.width = '65%';
+        } else {
+          setStep(stepRunning, runningIcon, runningText, 'active', '⏳', `Job ${life_cycle_state.toLowerCase()}...`, 'step-icon pulsing');
+          jobProgressBar.style.width = '40%';
+        }
       }
 
       // Terminal states
       if (life_cycle_state === 'TERMINATED' || life_cycle_state === 'INTERNAL_ERROR' || life_cycle_state === 'SKIPPED') {
         clearInterval(pollTimer);
         pollTimer = null;
+        jobProgressBar.style.width = '100%';
+        jobResult.style.display = 'block';
 
         if (result_state === 'SUCCESS') {
-          stepRunning.className = 'done';
-          runningIcon.className = 'step-icon';
-          runningIcon.textContent = '✅';
-          runningText.textContent = 'Job executed successfully';
-          stepComplete.className = 'done';
-          completeIcon.textContent = '✅';
-          completeText.textContent = 'Ingestion complete';
-          jobProgressBar.style.width = '100%';
+          setStep(stepRunning, runningIcon, runningText, 'done', '✅', 'Data ingested');
+          setStep(stepComplete, completeIcon, completeText, 'done', '✅', 'Data quality check passed');
           jobProgressBar.className = 'job-progress-bar success';
-          jobResult.style.display = 'block';
           jobResult.className = 'job-result success';
-          jobResult.textContent = '🎉 Data has been ingested into the Delta table.';
-        } else {
-          // FAILED, TIMEDOUT, CANCELED, or INTERNAL_ERROR
-          stepRunning.className = 'failed';
-          runningIcon.className = 'step-icon';
-          runningIcon.textContent = '❌';
-          runningText.textContent = `Job ${(result_state || life_cycle_state || 'failed').toLowerCase()}`;
-          stepComplete.className = 'failed';
-          completeIcon.textContent = '❌';
-          completeText.textContent = 'Ingestion failed';
-          jobProgressBar.style.width = '100%';
+          jobResult.textContent = '🎉 Data has been ingested into the Delta table and passed the quality check.';
+        } else if (ingestDone) {
+          // Data landed in the table, but the quality check did not pass.
+          setStep(stepRunning, runningIcon, runningText, 'done', '✅', 'Data ingested');
+          setStep(stepComplete, completeIcon, completeText, 'failed', '❌', 'Data quality check failed');
           jobProgressBar.className = 'job-progress-bar error';
-          jobResult.style.display = 'block';
           jobResult.className = 'job-result error';
-          jobResult.textContent = state_message
-            ? `Error: ${state_message}`
+          jobResult.textContent = quality.error
+            ? quality.error.replace(/^AssertionError:\s*/, '')
+            : `Data was ingested but the quality check ended with state: ${quality.result_state || result_state || life_cycle_state}`;
+        } else {
+          // Ingest itself failed (FAILED, TIMEDOUT, CANCELED, or INTERNAL_ERROR)
+          setStep(stepRunning, runningIcon, runningText, 'failed', '❌', `Ingestion ${(ingest.result_state || result_state || life_cycle_state || 'failed').toLowerCase()}`);
+          setStep(stepComplete, completeIcon, completeText, 'failed', '⬜', 'Data quality check skipped');
+          jobProgressBar.className = 'job-progress-bar error';
+          jobResult.className = 'job-result error';
+          const err = ingest.error || state_message;
+          jobResult.textContent = err
+            ? `Error: ${err}`
             : `Job ended with state: ${result_state || life_cycle_state}`;
         }
         // Refresh history to reflect updated status
